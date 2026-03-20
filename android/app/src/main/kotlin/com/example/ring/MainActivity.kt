@@ -13,6 +13,7 @@ import io.flutter.embedding.android.FlutterActivity
 import io.flutter.embedding.engine.FlutterEngine
 import io.flutter.plugin.common.MethodChannel
 import android.util.Log
+import android.media.AudioManager
 
 // ====================== ALARM RECEIVER ======================
 class AlarmReceiver : BroadcastReceiver() {
@@ -52,6 +53,7 @@ class MainActivity : FlutterActivity() {
     private val WAKE_CHANNEL = "com.example.text_alarm/wake"
     private val ALARM_CHANNEL = "com.example.text_alarm/alarm"
     private val MESSAGE_CHANNEL = "com.example.text_alarm/message"
+    private val VOLUME_CHANNEL = "com.example.ring/volume"  // Thêm channel này
 
     private var flutterEngineReady = false
 
@@ -122,6 +124,29 @@ class MainActivity : FlutterActivity() {
                     val vib = call.argument<Boolean>("vibrationEnabled") ?: true
                     if (msg != null) playMessageNow(msg, vib)
                     result.success(true)
+                }
+                else -> result.notImplemented()
+            }
+        }
+
+        // Volume Channel - Thêm channel để điều chỉnh âm lượng báo thức
+        MethodChannel(flutterEngine.dartExecutor.binaryMessenger, VOLUME_CHANNEL).setMethodCallHandler { call, result ->
+            when (call.method) {
+                "setAlarmVolume" -> {
+                    try {
+                        val audioManager = getSystemService(Context.AUDIO_SERVICE) as AudioManager
+                        // Chuyển sang stream ALARM
+                        audioManager.mode = AudioManager.MODE_NORMAL
+                        // Tùy chọn: tăng âm lượng báo thức lên mức hiện tại
+                        val maxAlarm = audioManager.getStreamMaxVolume(AudioManager.STREAM_ALARM)
+                        val currentAlarm = audioManager.getStreamVolume(AudioManager.STREAM_ALARM)
+                        if (currentAlarm < maxAlarm / 2) {
+                            audioManager.setStreamVolume(AudioManager.STREAM_ALARM, maxAlarm * 3 / 4, 0)
+                        }
+                        result.success(true)
+                    } catch (e: Exception) {
+                        result.error("ERROR", e.message, null)
+                    }
                 }
                 else -> result.notImplemented()
             }
