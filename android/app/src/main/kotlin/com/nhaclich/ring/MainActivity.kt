@@ -26,18 +26,19 @@ class AlarmReceiver : BroadcastReceiver() {
         val vibrationEnabled = intent?.getBooleanExtra("vibrationEnabled", true) ?: true
 
         try {
-            // WakeLock mạnh hơn
+            // Wake lock mạnh để đánh thức thiết bị
             val powerManager = context.getSystemService(Context.POWER_SERVICE) as PowerManager
             val wakeLock = powerManager.newWakeLock(
-                PowerManager.FULL_WAKE_LOCK or 
-                PowerManager.ACQUIRE_CAUSES_WAKEUP or 
-                PowerManager.ON_AFTER_RELEASE,
+                PowerManager.FULL_WAKE_LOCK or
+                        PowerManager.ACQUIRE_CAUSES_WAKEUP or
+                        PowerManager.ON_AFTER_RELEASE,
                 "TextAlarm::FinalWakeLock"
             )
             wakeLock.acquire(20 * 60 * 1000L) // 20 phút
 
+            // Intent mở MainActivity với flag fullscreen + play ngay
             val launchIntent = Intent(context, MainActivity::class.java).apply {
-                flags = Intent.FLAG_ACTIVITY_NEW_TASK or 
+                flags = Intent.FLAG_ACTIVITY_NEW_TASK or
                         Intent.FLAG_ACTIVITY_CLEAR_TOP or
                         Intent.FLAG_ACTIVITY_CLEAR_TASK or
                         Intent.FLAG_ACTIVITY_RESET_TASK_IF_NEEDED
@@ -47,9 +48,9 @@ class AlarmReceiver : BroadcastReceiver() {
             }
 
             context.startActivity(launchIntent)
-            Log.d("AlarmReceiver", "Launched MainActivity from receiver")
+            Log.d("AlarmReceiver", "Launched MainActivity with message: $message, vibration: $vibrationEnabled")
         } catch (e: Exception) {
-            Log.e("AlarmReceiver", "Launch error: ${e.message}")
+            Log.e("AlarmReceiver", "Failed to launch activity: ${e.message}", e)
         }
     }
 }
@@ -57,45 +58,48 @@ class AlarmReceiver : BroadcastReceiver() {
 // ====================== MAIN ACTIVITY ======================
 class MainActivity : FlutterActivity() {
 
-    private val WAKE_CHANNEL = "com.nhaclich.text_alarm/wake"
-    private val ALARM_CHANNEL = "com.nhaclich.text_alarm/alarm"
-    private val MESSAGE_CHANNEL = "com.nhaclich.text_alarm/message"
-    private val VOLUME_CHANNEL = "com.nhaclich.text_alarm/volume"
+    companion object {
+        private const val WAKE_CHANNEL = "com.nhaclich.text_alarm/wake"
+        private const val ALARM_CHANNEL = "com.nhaclich.text_alarm/alarm"
+        private const val MESSAGE_CHANNEL = "com.nhaclich.text_alarm/message"
+        private const val VOLUME_CHANNEL = "com.nhaclich.ring/volume"  // khớp với channel bạn dùng trong FullScreenMessage
+    }
 
     private var flutterEngineReady = false
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
 
-        // Quan trọng: Cho phép hiện trên màn hình khóa
+        // Cho phép hiển thị trên màn hình khóa và bật màn hình
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O_MR1) {
             setShowWhenLocked(true)
             setTurnScreenOn(true)
         } else {
             window.addFlags(
                 WindowManager.LayoutParams.FLAG_SHOW_WHEN_LOCKED or
-                WindowManager.LayoutParams.FLAG_DISMISS_KEYGUARD or
-                WindowManager.LayoutParams.FLAG_TURN_SCREEN_ON
+                        WindowManager.LayoutParams.FLAG_DISMISS_KEYGUARD or
+                        WindowManager.LayoutParams.FLAG_TURN_SCREEN_ON
             )
         }
 
+        // Giữ màn hình sáng khi báo thức đang chạy
         window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
 
-        handleIncomingIntent(intent)
-    }
-
-    override fun onNewIntent(intent: Intent) {
-        super.onNewIntent(intent)
-        setIntent(intent)
+        // Xử lý intent ngay từ đầu (khi app được mở từ AlarmReceiver)
         handleIncomingIntent(intent)
     }
 
     private fun handleIncomingIntent(intent: Intent?) {
-        if (intent == null || !intent.getBooleanExtra("playImmediately", false)) return
+        if (intent == null || !intent.getBooleanExtra("playImmediately", false)) {
+            return
+        }
 
         val message = intent.getStringExtra("message") ?: "Đã đến giờ!"
         val vibrationEnabled = intent.getBooleanExtra("vibrationEnabled", true)
 
+        Log.d("MainActivity", "Handling incoming alarm intent - message: $message, vibration: $vibrationEnabled")
+
+        // Lưu tạm vào SharedPreferences (phòng trường hợp Flutter engine chưa sẵn sàng)
         val prefs = getSharedPreferences("TextAlarmPrefs", Context.MODE_PRIVATE)
         prefs.edit()
             .putBoolean("AUTO_PLAY_KEY", true)
@@ -103,6 +107,7 @@ class MainActivity : FlutterActivity() {
             .putBoolean("VIBRATION_ENABLED_KEY", vibrationEnabled)
             .apply()
 
+        // Nếu Flutter engine đã sẵn sàng → gửi ngay lệnh play
         if (flutterEngineReady) {
             playMessageNow(message, vibrationEnabled)
         }
@@ -111,10 +116,16 @@ class MainActivity : FlutterActivity() {
     override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
         super.configureFlutterEngine(flutterEngine)
 
+        // Channel wake device
         MethodChannel(flutterEngine.dartExecutor.binaryMessenger, WAKE_CHANNEL).setMethodCallHandler { call, result ->
-            if (call.method == "wakeUpDevice") result.success(wakeUpDevice())
+            if (call.method == "wakeUpDevice") {
+                result.success(wakeUpDevice())
+            } else {
+                result.notImplemented()
+            }
         }
 
+        // Channel set alarm
         MethodChannel(flutterEngine.dartExecutor.binaryMessenger, ALARM_CHANNEL).setMethodCallHandler { call, result ->
             when (call.method) {
                 "setAlarm" -> {
@@ -122,33 +133,30 @@ class MainActivity : FlutterActivity() {
                     val message = call.argument<String>("message")
                     val vibrationEnabled = call.argument<Boolean>("vibrationEnabled") ?: true
 
-                    if (timeMillis != null && message != null) {
+                    if (timeMillis != null && !message.isNullOrEmpty()) {
                         setAlarm(timeMillis, message, vibrationEnabled)
                         result.success(true)
                     } else {
-                        result.error("INVALID_ARGUMENT", "Missing data", null)
+                        result.error("INVALID_ARGUMENT", "Missing timeMillis or message", null)
                     }
-                }
-                "cancelAlarm" -> {
-                    cancelAlarm()
-                    result.success(true)
                 }
                 else -> result.notImplemented()
             }
         }
 
+        // Channel set alarm volume (dùng trong FullScreenMessage)
         MethodChannel(flutterEngine.dartExecutor.binaryMessenger, VOLUME_CHANNEL).setMethodCallHandler { call, result ->
             if (call.method == "setAlarmVolume") {
                 try {
                     val am = getSystemService(Context.AUDIO_SERVICE) as AudioManager
-                    val current = am.getStreamVolume(AudioManager.STREAM_ALARM)
                     val max = am.getStreamMaxVolume(AudioManager.STREAM_ALARM)
-                    if (current < max * 0.7) {
-                        am.setStreamVolume(AudioManager.STREAM_ALARM, (max * 0.8).toInt(), 0)
-                    }
+                    val targetVolume = (max * 0.85).toInt()  // 85% volume báo thức
+                    am.setStreamVolume(AudioManager.STREAM_ALARM, targetVolume, 0)
+                    Log.d("VolumeChannel", "Set alarm volume to $targetVolume / $max")
                     result.success(true)
                 } catch (e: Exception) {
-                    result.error("ERROR", e.message, null)
+                    Log.e("VolumeChannel", "Set volume failed: ${e.message}")
+                    result.error("VOLUME_ERROR", e.message, null)
                 }
             } else {
                 result.notImplemented()
@@ -156,29 +164,38 @@ class MainActivity : FlutterActivity() {
         }
 
         flutterEngineReady = true
+
+        // Kiểm tra lại intent sau khi engine sẵn sàng
+        handleIncomingIntent(intent)
     }
 
     private fun playMessageNow(message: String, vibrationEnabled: Boolean) {
+        Log.d("MainActivity", "Sending playMessageNow to Flutter: $message, vibration: $vibrationEnabled")
+
         wakeUpDevice()
         flutterEngine?.dartExecutor?.binaryMessenger?.let { messenger ->
             MethodChannel(messenger, MESSAGE_CHANNEL).invokeMethod(
                 "playMessageNow",
-                mapOf("message" to message, "vibrationEnabled" to vibrationEnabled)
+                mapOf(
+                    "message" to message,
+                    "vibrationEnabled" to vibrationEnabled
+                )
             )
         }
     }
 
     private fun wakeUpDevice(): Boolean {
-        try {
+        return try {
             val pm = getSystemService(Context.POWER_SERVICE) as PowerManager
             val wl = pm.newWakeLock(
                 PowerManager.FULL_WAKE_LOCK or PowerManager.ACQUIRE_CAUSES_WAKEUP or PowerManager.ON_AFTER_RELEASE,
                 "TextAlarm:WakeLock"
             )
-            wl.acquire(15 * 60 * 1000L)
-            return true
+            wl.acquire(15 * 60 * 1000L) // 15 phút
+            true
         } catch (e: Exception) {
-            return false
+            Log.e("MainActivity", "Wake up failed: ${e.message}")
+            false
         }
     }
 
@@ -191,43 +208,30 @@ class MainActivity : FlutterActivity() {
                 putExtra("vibrationEnabled", vibrationEnabled)
             }
 
+            val requestCode = (timeMillis / 1000).toInt()
+
             val flags = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
                 PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
             } else {
                 PendingIntent.FLAG_UPDATE_CURRENT
             }
 
-            val requestCode = (timeMillis / 1000).toInt()
             val pendingIntent = PendingIntent.getBroadcast(this, requestCode, intent, flags)
 
-            // Cách mạnh nhất hiện nay
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
                 alarmManager.setExactAndAllowWhileIdle(AlarmManager.RTC_WAKEUP, timeMillis, pendingIntent)
             } else {
                 alarmManager.setExact(AlarmManager.RTC_WAKEUP, timeMillis, pendingIntent)
             }
 
-            val alarmClockInfo = AlarmManager.AlarmClockInfo(timeMillis, pendingIntent)
-            alarmManager.setAlarmClock(alarmClockInfo, pendingIntent)
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP) {
+                val alarmClockInfo = AlarmManager.AlarmClockInfo(timeMillis, pendingIntent)
+                alarmManager.setAlarmClock(alarmClockInfo, pendingIntent)
+            }
 
-            Log.d("MainActivity", "Alarm set at $timeMillis")
+            Log.d("MainActivity", "Alarm scheduled at $timeMillis - message: $message")
         } catch (e: Exception) {
-            Log.e("MainActivity", "Set alarm failed: ${e.message}")
-        }
-    }
-
-    private fun cancelAlarm() {
-        try {
-            val alarmManager = getSystemService(Context.ALARM_SERVICE) as AlarmManager
-            val intent = Intent(this, AlarmReceiver::class.java)
-            val flags = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
-                PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
-            } else PendingIntent.FLAG_UPDATE_CURRENT
-
-            val pendingIntent = PendingIntent.getBroadcast(this, 0, intent, flags)
-            alarmManager.cancel(pendingIntent)
-        } catch (e: Exception) {
-            Log.e("MainActivity", "Cancel error: ${e.message}")
+            Log.e("MainActivity", "Set alarm failed: ${e.message}", e)
         }
     }
 }

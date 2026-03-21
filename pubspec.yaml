@@ -26,6 +26,7 @@ dependencies:
   provider: ^6.1.1
   flutter_native_splash: ^2.4.6
   flutter_tts: ^3.8.0
+  uuid: ^4.0.0
   
 dev_dependencies:
   flutter_test:

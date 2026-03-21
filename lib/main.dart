@@ -4,12 +4,12 @@ import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:permission_handler/permission_handler.dart';
-
 import 'package:wakelock_plus/wakelock_plus.dart';
 import 'package:flutter_local_notifications/flutter_local_notifications.dart';
 import 'package:timezone/timezone.dart' as tz;
 import 'package:timezone/data/latest.dart' as tzdata;
 import 'package:shared_preferences/shared_preferences.dart';
+import 'package:uuid/uuid.dart';
 
 import 'models/alarm_model.dart';
 import 'screens/create_alarm_screen.dart';
@@ -17,14 +17,12 @@ import 'screens/fullscreen_message_screen.dart';
 
 final GlobalKey<NavigatorState> navigatorKey = GlobalKey<NavigatorState>();
 
-// Constants
 const String _kChannelId = 'text_alarm_channel';
 const String _kChannelName = 'Text Alarm Notifications';
 const String _kChannelDesc = 'Notifications for text alarms';
 const String _kAlarmsPrefsKey = 'saved_alarms';
 
-// Method channels
-const MethodChannel _videoChannel =
+const MethodChannel _messageChannel =
     MethodChannel('com.nhaclich.text_alarm/message');
 
 Future<void> main() async {
@@ -34,9 +32,10 @@ Future<void> main() async {
   await _initializeNotifications();
   await requestPermissions();
 
-  runApp(const MaterialApp(
+  runApp(MaterialApp(
     debugShowCheckedModeBanner: false,
-    home: TextAlarmApp(),
+    navigatorKey: navigatorKey,
+    home: const TextAlarmApp(),
   ));
 }
 
@@ -105,8 +104,6 @@ Future<void> requestPermissions() async {
   }
 }
 
-// ========================== MAIN APP ==========================
-
 class TextAlarmApp extends StatefulWidget {
   const TextAlarmApp({super.key});
 
@@ -116,15 +113,10 @@ class TextAlarmApp extends StatefulWidget {
 
 class _TextAlarmAppState extends State<TextAlarmApp>
     with WidgetsBindingObserver {
-  String? alarmMessage;
-  DateTime? scheduledTime;
-  bool isVibrationEnabled = true;
   List<AlarmModel> alarms = [];
 
   final MethodChannel _alarmChannel =
       const MethodChannel('com.nhaclich.text_alarm/alarm');
-  final MethodChannel _wakeChannel =
-      const MethodChannel('com.nhaclich.text_alarm/wake');
   final MethodChannel _messageChannel =
       const MethodChannel('com.nhaclich.text_alarm/message');
 
@@ -132,7 +124,6 @@ class _TextAlarmAppState extends State<TextAlarmApp>
   void initState() {
     super.initState();
     WidgetsBinding.instance.addObserver(this);
-    _loadSavedSettings();
     _loadSavedAlarms();
 
     _messageChannel.setMethodCallHandler((call) async {
@@ -143,6 +134,15 @@ class _TextAlarmAppState extends State<TextAlarmApp>
 
         if (message != null && mounted) {
           await wakeUpDevice();
+
+          AlarmModel? triggeredAlarm;
+          try {
+            triggeredAlarm = alarms.firstWhere(
+              (a) => a.message == message && a.enabled,
+              orElse: () => alarms.firstWhere((a) => a.message == message),
+            );
+          } catch (_) {}
+
           Future.delayed(Duration.zero, () {
             if (mounted) {
               Navigator.push(
@@ -153,7 +153,19 @@ class _TextAlarmAppState extends State<TextAlarmApp>
                     isVibrationEnabled: vibration,
                   ),
                 ),
-              );
+              ).then((_) async {
+                if (triggeredAlarm != null && triggeredAlarm.enabled) {
+                  if (triggeredAlarm.isRepeating) {
+                    // Lặp lại → lên lịch lần sau
+                    await _scheduleAlarm(triggeredAlarm);
+                  } else {
+                    // Một lần → disable
+                    triggeredAlarm.enabled = false;
+                    await _saveAlarms();
+                    setState(() {}); // Cập nhật UI
+                  }
+                }
+              });
             }
           });
         }
@@ -168,38 +180,24 @@ class _TextAlarmAppState extends State<TextAlarmApp>
     super.dispose();
   }
 
-  Future<void> _loadSavedSettings() async {
-    final prefs = await SharedPreferences.getInstance();
-    setState(() {
-      alarmMessage = prefs.getString('alarmMessage');
-      isVibrationEnabled = prefs.getBool('vibrationEnabled') ?? true;
-
-      final millis = prefs.getInt('scheduledTime');
-      if (millis != null) {
-        final time = DateTime.fromMillisecondsSinceEpoch(millis);
-        if (time.isAfter(DateTime.now())) {
-          scheduledTime = time;
-        }
-      }
-    });
-  }
-
   Future<void> _loadSavedAlarms() async {
     final prefs = await SharedPreferences.getInstance();
     final saved = prefs.getStringList(_kAlarmsPrefsKey);
 
     if (saved != null) {
-      final now = DateTime.now();
       final list = saved
           .map((e) => AlarmModel.fromJson(json.decode(e)))
-          .where((a) => a.scheduledTime.isAfter(now))
+          .where((a) => a.enabled)
           .toList();
 
-      setState(() => alarms = list);
+      setState(() {
+        alarms = list;
+      });
 
       for (var alarm in list) {
-        _setNativeAlarm(
-            alarm.scheduledTime, alarm.message, alarm.isVibrationEnabled);
+        if (alarm.enabled) {
+          await _scheduleAlarm(alarm);
+        }
       }
     }
   }
@@ -210,61 +208,91 @@ class _TextAlarmAppState extends State<TextAlarmApp>
     await prefs.setStringList(_kAlarmsPrefsKey, jsonList);
   }
 
-  Future<void> _showMessageInput() async {
-    final controller = TextEditingController(text: alarmMessage);
+  // Hàm đặt alarm (dùng chung cho cả một lần và lặp lại)
+  Future<void> _scheduleAlarm(AlarmModel alarm) async {
+    final DateTime targetTime;
 
-    final result = await showDialog<String>(
-      context: context,
-      builder: (context) => AlertDialog(
-        title: const Text('Nội dung báo thức'),
-        content: TextField(
-          controller: controller,
-          maxLines: 6,
-          decoration: const InputDecoration(
-            hintText: 'Nhập lời nhắn sẽ hiển thị khi báo thức kêu...',
-            border: OutlineInputBorder(),
-          ),
-        ),
-        actions: [
-          TextButton(
-              onPressed: () => Navigator.pop(context),
-              child: const Text('Hủy')),
-          TextButton(
-            onPressed: () => Navigator.pop(context, controller.text.trim()),
-            child: const Text('Lưu'),
-          ),
-        ],
-      ),
+    if (alarm.isRepeating) {
+      // Với lặp lại: tìm lần gần nhất trong tương lai
+      targetTime = _getNextOccurrence(alarm) ?? alarm.scheduledTime;
+      if (!targetTime.isAfter(DateTime.now())) {
+        print("No future repeat time found for alarm ${alarm.id}");
+        return;
+      }
+    } else {
+      // Không lặp: chỉ đặt nếu chưa qua
+      if (alarm.scheduledTime.isBefore(DateTime.now())) {
+        print("One-time alarm ${alarm.id} already passed, skipping schedule.");
+        return;
+      }
+      targetTime = alarm.scheduledTime;
+    }
+
+    await _setNativeAlarm(
+      targetTime,
+      alarm.message,
+      alarm.isVibrationEnabled,
     );
+  }
 
-    if (result != null && result.isNotEmpty) {
-      setState(() => alarmMessage = result);
-      final prefs = await SharedPreferences.getInstance();
-      await prefs.setString('alarmMessage', result);
+  DateTime? _getNextOccurrence(AlarmModel alarm) {
+    if (!alarm.isRepeating || alarm.repeatDays.every((e) => !e)) {
+      return null;
+    }
+
+    DateTime now = DateTime.now();
+    DateTime candidate = now;
+
+    for (int i = 0; i < 14; i++) {
+      final weekdayIndex = candidate.weekday - 1;
+      if (alarm.repeatDays[weekdayIndex]) {
+        final next = DateTime(
+          candidate.year,
+          candidate.month,
+          candidate.day,
+          alarm.scheduledTime.hour,
+          alarm.scheduledTime.minute,
+        );
+
+        if (next.isAfter(now) || next.isAtSameMomentAs(now)) {
+          return next;
+        }
+      }
+      candidate = candidate.add(const Duration(days: 1));
+    }
+    return null;
+  }
+
+  Future<void> _setNativeAlarm(
+      DateTime time, String message, bool vibrationEnabled) async {
+    if (Platform.isAndroid) {
+      try {
+        await _alarmChannel.invokeMethod('setAlarm', {
+          'timeMillis': time.millisecondsSinceEpoch,
+          'message': message,
+          'vibrationEnabled': vibrationEnabled,
+        });
+        print("Native alarm set for ${time.toString()} - $message");
+      } catch (e) {
+        print('Error setting native alarm: $e');
+      }
     }
   }
 
   Future<void> _createNewAlarm() async {
-    if (alarmMessage == null || alarmMessage!.isEmpty) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Vui lòng nhập nội dung báo thức trước')),
-      );
-      await _showMessageInput();
-      return;
-    }
-
     final result = await Navigator.push<AlarmModel>(
       context,
       MaterialPageRoute(builder: (_) => const CreateAlarmScreen()),
     );
 
     if (result != null) {
-      setState(() => alarms.add(result));
-      alarms.sort((a, b) => a.scheduledTime.compareTo(b.scheduledTime));
+      setState(() {
+        alarms.add(result);
+        alarms.sort((a, b) => a.scheduledTime.compareTo(b.scheduledTime));
+      });
       await _saveAlarms();
 
-      _setNativeAlarm(
-          result.scheduledTime, result.message, result.isVibrationEnabled);
+      await _scheduleAlarm(result);
 
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
@@ -284,11 +312,13 @@ class _TextAlarmAppState extends State<TextAlarmApp>
     );
 
     if (edited != null) {
-      setState(() => alarms[index] = edited);
-      alarms.sort((a, b) => a.scheduledTime.compareTo(b.scheduledTime));
+      setState(() {
+        alarms[index] = edited;
+        alarms.sort((a, b) => a.scheduledTime.compareTo(b.scheduledTime));
+      });
       await _saveAlarms();
-      _setNativeAlarm(
-          edited.scheduledTime, edited.message, edited.isVibrationEnabled);
+
+      await _scheduleAlarm(edited);
 
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(content: Text('Báo thức đã được cập nhật')),
@@ -301,15 +331,18 @@ class _TextAlarmAppState extends State<TextAlarmApp>
       context: context,
       builder: (context) => AlertDialog(
         title: const Text('Xóa báo thức?'),
-        content: const Text('Bạn có chắc muốn xóa?'),
+        content: const Text('Bạn có chắc muốn xóa báo thức này?'),
         actions: [
           TextButton(
-              onPressed: () => Navigator.pop(context),
-              child: const Text('Hủy')),
+            onPressed: () => Navigator.pop(context),
+            child: const Text('Hủy'),
+          ),
           TextButton(
             onPressed: () async {
               Navigator.pop(context);
-              setState(() => alarms.removeAt(index));
+              setState(() {
+                alarms[index].enabled = false;
+              });
               await _saveAlarms();
               ScaffoldMessenger.of(context).showSnackBar(
                 const SnackBar(content: Text('Đã xóa báo thức')),
@@ -322,58 +355,17 @@ class _TextAlarmAppState extends State<TextAlarmApp>
     );
   }
 
-  Future<void> _setNativeAlarm(
-      DateTime time, String message, bool vibrationEnabled) async {
-    if (Platform.isAndroid) {
-      try {
-        await _alarmChannel.invokeMethod('setAlarm', {
-          'timeMillis': time.millisecondsSinceEpoch,
-          'message': message,
-          'vibrationEnabled': vibrationEnabled,
-        });
-      } catch (e) {
-        print('Error setting native alarm: $e');
-      }
-    }
-  }
-
-  Future<void> _scheduleNotification(
-      DateTime date, String message, bool vibration) async {
-    final androidDetails = AndroidNotificationDetails(
-      _kChannelId,
-      _kChannelName,
-      channelDescription: _kChannelDesc,
-      importance: Importance.max,
-      priority: Priority.high,
-      fullScreenIntent: true,
-    );
-
-    final details = NotificationDetails(android: androidDetails);
-
-    final tzTime = tz.TZDateTime.from(date, tz.local);
-
-    await _notificationsPlugin.zonedSchedule(
-      0,
-      'Báo Thức',
-      'Đã đến giờ!',
-      tzTime,
-      details,
-      androidScheduleMode: AndroidScheduleMode.exactAllowWhileIdle,
-      uiLocalNotificationDateInterpretation:
-          UILocalNotificationDateInterpretation.absoluteTime,
-      payload: '$message|$vibration',
-    );
-  }
-
   String _formatDateTime(DateTime dt) {
-    return '${dt.day}/${dt.month}/${dt.year} ${dt.hour}:${dt.minute.toString().padLeft(2, '0')}';
+    return '${dt.day.toString().padLeft(2, '0')}/${dt.month.toString().padLeft(2, '0')}/${dt.year} ${dt.hour.toString().padLeft(2, '0')}:${dt.minute.toString().padLeft(2, '0')}';
   }
 
   @override
   Widget build(BuildContext context) {
+    final activeAlarms = alarms.where((a) => a.enabled).toList();
+
     return Scaffold(
       appBar: AppBar(title: const Text('NHẮC LỊCH')),
-      body: alarms.isEmpty
+      body: activeAlarms.isEmpty
           ? Center(
               child: Column(
                 mainAxisAlignment: MainAxisAlignment.center,
@@ -390,13 +382,14 @@ class _TextAlarmAppState extends State<TextAlarmApp>
             )
           : ListView.builder(
               padding: const EdgeInsets.all(16),
-              itemCount: alarms.length,
+              itemCount: activeAlarms.length,
               itemBuilder: (context, index) {
-                final alarm = alarms[index];
+                final alarm = activeAlarms[index];
+
                 return Card(
                   margin: const EdgeInsets.only(bottom: 16),
                   child: ListTile(
-                    onTap: () => _editAlarm(index),
+                    onTap: () => _editAlarm(alarms.indexOf(alarm)),
                     title: Text(
                       '${alarm.scheduledTime.hour.toString().padLeft(2, '0')}:${alarm.scheduledTime.minute.toString().padLeft(2, '0')}',
                       style: const TextStyle(
@@ -408,8 +401,10 @@ class _TextAlarmAppState extends State<TextAlarmApp>
                         Text(alarm.message,
                             maxLines: 2, overflow: TextOverflow.ellipsis),
                         const SizedBox(height: 8),
-                        Text(alarm.getRepeatDaysText(),
-                            style: const TextStyle(color: Colors.blue)),
+                        Text(
+                          alarm.getRepeatDaysText(),
+                          style: const TextStyle(color: Colors.blue),
+                        ),
                       ],
                     ),
                     trailing: Row(
@@ -417,10 +412,11 @@ class _TextAlarmAppState extends State<TextAlarmApp>
                       children: [
                         IconButton(
                             icon: const Icon(Icons.edit),
-                            onPressed: () => _editAlarm(index)),
+                            onPressed: () => _editAlarm(alarms.indexOf(alarm))),
                         IconButton(
-                            icon: const Icon(Icons.delete, color: Colors.red),
-                            onPressed: () => _deleteAlarm(index)),
+                          icon: const Icon(Icons.delete, color: Colors.red),
+                          onPressed: () => _deleteAlarm(alarms.indexOf(alarm)),
+                        ),
                       ],
                     ),
                   ),
