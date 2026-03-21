@@ -95,99 +95,107 @@ class _CreateAlarmScreenState extends State<CreateAlarmScreen> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(
-        title: Text(widget.existingAlarm == null
-            ? 'Tạo báo thức mới'
-            : 'Chỉnh sửa báo thức'),
-        actions: [
-          TextButton(
-            onPressed: _saveAlarm,
-            child: const Text('Lưu',
-                style: TextStyle(color: Colors.white, fontSize: 18)),
-          ),
-        ],
-      ),
-      body: SingleChildScrollView(
-        padding: const EdgeInsets.all(16.0),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            // Nội dung báo thức
-            const Text('Nội dung hiển thị khi báo thức kêu',
-                style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
-            const SizedBox(height: 8),
-            TextField(
-              maxLines: 5,
-              decoration: const InputDecoration(
-                border: OutlineInputBorder(),
-                hintText:
-                    'Ví dụ: Dậy đi con, hôm nay thi rồi! Nhớ mang sách theo...',
-              ),
-              controller: TextEditingController(text: message),
-              onChanged: (value) => message = value,
+        appBar: AppBar(
+          title:
+              Text(widget.existingAlarm == null ? 'Tạo báo thức' : 'Báo thức'),
+          actions: [
+            TextButton(
+              onPressed: _saveAlarm,
+              child: const Text('Lưu',
+                  style: TextStyle(
+                      color: Color.fromARGB(255, 5, 97, 154),
+                      fontSize: 20,
+                      fontWeight: FontWeight.bold)),
             ),
-
-            const SizedBox(height: 24),
-
-            // Thời gian
-            const Text('Thời gian báo thức',
-                style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
-            const SizedBox(height: 8),
-            Card(
-              child: ListTile(
-                leading: const Icon(Icons.access_time, color: Colors.blue),
-                title: Text(
-                  DateFormat('HH:mm').format(selectedDateTime),
-                  style: const TextStyle(
-                      fontSize: 40, fontWeight: FontWeight.bold),
-                ),
-                subtitle: Text(
-                    DateFormat('EEEE, dd/MM/yyyy').format(selectedDateTime)),
-                onTap: _pickTime,
-              ),
-            ),
-
-            const SizedBox(height: 24),
-
-            // Rung
-            SwitchListTile(
-              title: const Text('Bật rung'),
-              subtitle: const Text('Thiết bị sẽ rung khi báo thức kêu'),
-              value: isVibrationEnabled,
-              onChanged: (value) => setState(() => isVibrationEnabled = value),
-              secondary: const Icon(Icons.vibration),
-            ),
-
-            const SizedBox(height: 16),
-
-            // Lặp lại
-            SwitchListTile(
-              title: const Text('Lặp lại'),
-              value: isRepeating,
-              onChanged: (value) => setState(() => isRepeating = value),
-              secondary: const Icon(Icons.repeat),
-            ),
-
-            if (isRepeating) ...[
-              const SizedBox(height: 12),
-              const Text('Chọn ngày lặp lại:',
-                  style: TextStyle(fontWeight: FontWeight.bold)),
-              const SizedBox(height: 8),
-              Wrap(
-                spacing: 8,
-                children: List.generate(7, (index) {
-                  return FilterChip(
-                    label: Text(dayLabels[index]),
-                    selected: repeatDays[index],
-                    onSelected: (_) => _toggleRepeatDay(index),
-                    selectedColor: Colors.blue.withOpacity(0.3),
-                  );
-                }),
-              ),
-            ],
           ],
         ),
-      ),
-    );
+        body: ListView(
+          children: [
+            SingleChildScrollView(
+              padding: const EdgeInsets.all(16.0),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  // Nội dung báo thức
+                  const Text('Nội dung hiển thị khi báo thức kêu',
+                      style:
+                          TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
+                  const SizedBox(height: 8),
+                  TextField(
+                    maxLines: 5,
+                    decoration: const InputDecoration(
+                      border: OutlineInputBorder(),
+                      hintText: 'Ví dụ: Sáng rồi đừng lười nữa ...',
+                    ),
+                    controller: TextEditingController(text: message),
+                    onChanged: (value) => message = value,
+                  ),
+
+                  const SizedBox(height: 24),
+
+                  // Thời gian
+                  const Text('Thời gian báo thức',
+                      style:
+                          TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
+                  const SizedBox(height: 8),
+                  Card(
+                    child: ListTile(
+                      leading:
+                          const Icon(Icons.access_time, color: Colors.blue),
+                      title: Text(
+                        DateFormat('HH:mm').format(selectedDateTime),
+                        style: const TextStyle(
+                            fontSize: 40, fontWeight: FontWeight.bold),
+                      ),
+                      subtitle: Text(DateFormat('EEEE, dd/MM/yyyy')
+                          .format(selectedDateTime)),
+                      onTap: _pickTime,
+                    ),
+                  ),
+
+                  const SizedBox(height: 24),
+
+                  // Rung
+                  SwitchListTile(
+                    title: const Text('Bật rung'),
+                    subtitle: const Text('Thiết bị sẽ rung khi báo thức kêu'),
+                    value: isVibrationEnabled,
+                    onChanged: (value) =>
+                        setState(() => isVibrationEnabled = value),
+                    secondary: const Icon(Icons.vibration),
+                  ),
+
+                  const SizedBox(height: 16),
+
+                  // Lặp lại
+                  SwitchListTile(
+                    title: const Text('Lặp lại'),
+                    value: isRepeating,
+                    onChanged: (value) => setState(() => isRepeating = value),
+                    secondary: const Icon(Icons.repeat),
+                  ),
+
+                  if (isRepeating) ...[
+                    const SizedBox(height: 12),
+                    const Text('Chọn ngày lặp lại:',
+                        style: TextStyle(fontWeight: FontWeight.bold)),
+                    const SizedBox(height: 8),
+                    Wrap(
+                      spacing: 8,
+                      children: List.generate(7, (index) {
+                        return FilterChip(
+                          label: Text(dayLabels[index]),
+                          selected: repeatDays[index],
+                          onSelected: (_) => _toggleRepeatDay(index),
+                          selectedColor: Colors.blue.withOpacity(0.3),
+                        );
+                      }),
+                    ),
+                  ],
+                ],
+              ),
+            ),
+          ],
+        ));
   }
 }

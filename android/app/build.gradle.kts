@@ -6,11 +6,11 @@ plugins {
 }
 
 android {
-    namespace = "com.example.ring" // đổi theo app của bạn
+    namespace = "com.nhaclich.ring" // đổi theo app của bạn
     compileSdk = 36
 
     defaultConfig {
-        applicationId = "com.example.ring" // đổi theo app của bạn
+        applicationId = "com.nhaclich.ring" // đổi theo app của bạn
         minSdk = flutter.minSdkVersion
         targetSdk = 35
         versionCode = 1

@@ -25,7 +25,7 @@ const String _kAlarmsPrefsKey = 'saved_alarms';
 
 // Method channels
 const MethodChannel _videoChannel =
-    MethodChannel('com.example.text_alarm/message');
+    MethodChannel('com.nhaclich.text_alarm/message');
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -71,7 +71,7 @@ void _onNotificationTapped(NotificationResponse response) {
       final message = parts[0];
       final vibrationEnabled = parts[1] == 'true';
 
-      const platform = MethodChannel('com.example.text_alarm/alarm');
+      const platform = MethodChannel('com.nhaclich.text_alarm/alarm');
       platform.invokeMethod('playMessageDirectly', {
         'message': message,
         'vibrationEnabled': vibrationEnabled,
@@ -83,7 +83,7 @@ void _onNotificationTapped(NotificationResponse response) {
 Future<void> wakeUpDevice() async {
   await WakelockPlus.enable();
   if (Platform.isAndroid) {
-    const platform = MethodChannel('com.example.text_alarm/wake');
+    const platform = MethodChannel('com.nhaclich.text_alarm/wake');
     try {
       await platform.invokeMethod('wakeUpDevice');
     } catch (e) {
@@ -122,11 +122,11 @@ class _TextAlarmAppState extends State<TextAlarmApp>
   List<AlarmModel> alarms = [];
 
   final MethodChannel _alarmChannel =
-      const MethodChannel('com.example.text_alarm/alarm');
+      const MethodChannel('com.nhaclich.text_alarm/alarm');
   final MethodChannel _wakeChannel =
-      const MethodChannel('com.example.text_alarm/wake');
+      const MethodChannel('com.nhaclich.text_alarm/wake');
   final MethodChannel _messageChannel =
-      const MethodChannel('com.example.text_alarm/message');
+      const MethodChannel('com.nhaclich.text_alarm/message');
 
   @override
   void initState() {
@@ -372,7 +372,7 @@ class _TextAlarmAppState extends State<TextAlarmApp>
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(title: const Text('Text Alarm')),
+      appBar: AppBar(title: const Text('NHẮC LỊCH')),
       body: alarms.isEmpty
           ? Center(
               child: Column(

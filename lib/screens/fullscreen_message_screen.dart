@@ -1,10 +1,11 @@
+// screens/fullscreen_message_screen.dart
 import 'package:flutter/material.dart';
 import 'package:vibration/vibration.dart';
 import 'package:flutter/services.dart';
 import 'package:wakelock_plus/wakelock_plus.dart';
 import 'package:flutter_tts/flutter_tts.dart';
-import '../main.dart';
 import 'dart:async';
+import '../main.dart';
 
 class FullScreenMessage extends StatefulWidget {
   final String message;
@@ -23,10 +24,12 @@ class FullScreenMessage extends StatefulWidget {
 class _FullScreenMessageState extends State<FullScreenMessage> {
   final FlutterTts _flutterTts = FlutterTts();
   final MethodChannel _volumeChannel =
-      const MethodChannel('com.example.ring/volume');
+      const MethodChannel('com.nhaclich.ring/volume');
 
   Timer? _vibrationTimer;
+  Timer? _speechTimer;
   bool _isSpeaking = true;
+
   late final String _fullText;
 
   @override
@@ -35,6 +38,7 @@ class _FullScreenMessageState extends State<FullScreenMessage> {
     WakelockPlus.enable();
     SystemChrome.setEnabledSystemUIMode(SystemUiMode.immersiveSticky);
 
+    // Tạo câu nói đầy đủ chỉ 1 lần
     final now = DateTime.now();
     final timeStr =
         "${now.hour} giờ ${now.minute.toString().padLeft(2, '0')} phút";
@@ -49,9 +53,8 @@ class _FullScreenMessageState extends State<FullScreenMessage> {
   }
 
   Future<void> _initTtsAndVolume() async {
-    // Buộc sử dụng âm lượng báo thức (Alarm Volume)
+    // Buộc dùng âm lượng báo thức (Alarm Volume)
     try {
-      // Điều chỉnh âm lượng của stream ALARM (âm lượng báo thức)
       await _volumeChannel.invokeMethod('setAlarmVolume');
     } catch (e) {
       print("Không set được alarm volume: $e");
@@ -59,29 +62,24 @@ class _FullScreenMessageState extends State<FullScreenMessage> {
 
     await _flutterTts.setLanguage("vi-VN");
     await _flutterTts.setSpeechRate(0.73);
-    await _flutterTts.setVolume(1.0); // Đảm bảo âm lượng đầy đủ
+    await _flutterTts.setVolume(1.0);
     await _flutterTts.setPitch(1.0);
     await _flutterTts.awaitSpeakCompletion(true);
   }
 
   void _startSpeaking() {
-    _speak(); // Đọc ngay lập tức
+    _speak();
 
-    _flutterTts.setStartHandler(() {
-      print("Speech started...");
-    });
-
-    _flutterTts.setCompletionHandler(() {
-      if (_isSpeaking) {
-        _speak(); // Khi xong, đọc lại nội dung
+    _speechTimer = Timer.periodic(const Duration(milliseconds: 2500), (_) {
+      if (mounted && _isSpeaking) {
+        _speak();
       }
     });
   }
 
   Future<void> _speak() async {
-    if (_isSpeaking) {
-      await _flutterTts.speak(_fullText); // Đọc thời gian và nội dung
-    }
+    if (!_isSpeaking) return;
+    await _flutterTts.speak(_fullText);
   }
 
   void _startVibration() async {
@@ -96,6 +94,7 @@ class _FullScreenMessageState extends State<FullScreenMessage> {
   void _stopAlarm() async {
     _isSpeaking = false;
     _vibrationTimer?.cancel();
+    _speechTimer?.cancel();
     await _flutterTts.stop();
     await Vibration.cancel();
     await WakelockPlus.disable();
@@ -112,6 +111,7 @@ class _FullScreenMessageState extends State<FullScreenMessage> {
   @override
   void dispose() {
     _vibrationTimer?.cancel();
+    _speechTimer?.cancel();
     _flutterTts.stop();
     Vibration.cancel();
     WakelockPlus.disable();

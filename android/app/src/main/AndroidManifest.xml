@@ -21,7 +21,7 @@
     <application
         android:name="${applicationName}"
         android:icon="@mipmap/ic_launcher"
-        android:label="Ngạn Thức"
+        android:label="Nhắc Lịch"
         android:enableOnBackInvokedCallback="true">
 
         <!-- ==================== MAIN ACTIVITY ==================== -->
