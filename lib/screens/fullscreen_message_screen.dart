@@ -27,8 +27,8 @@ class _FullScreenMessageState extends State<FullScreenMessage> {
       const MethodChannel('com.nhaclich.ring/volume');
 
   Timer? _vibrationTimer;
-  Timer? _speechTimer;
   bool _isSpeaking = true;
+  bool _shouldContinueSpeaking = true;
 
   late final String _fullText;
 
@@ -38,14 +38,14 @@ class _FullScreenMessageState extends State<FullScreenMessage> {
     WakelockPlus.enable();
     SystemChrome.setEnabledSystemUIMode(SystemUiMode.immersiveSticky);
 
-    // Tạo câu nói đầy đủ chỉ 1 lần
+    // Tạo nội dung đầy đủ
     final now = DateTime.now();
     final timeStr =
         "${now.hour} giờ ${now.minute.toString().padLeft(2, '0')} phút";
     _fullText = "Bây giờ là $timeStr. ${widget.message}";
 
     _initTtsAndVolume();
-    _startSpeaking();
+    _startSpeakingLoop();
 
     if (widget.isVibrationEnabled) {
       _startVibration();
@@ -53,53 +53,68 @@ class _FullScreenMessageState extends State<FullScreenMessage> {
   }
 
   Future<void> _initTtsAndVolume() async {
-    // Buộc dùng âm lượng báo thức (Alarm Volume)
     try {
       await _volumeChannel.invokeMethod('setAlarmVolume');
     } catch (e) {
       print("Không set được alarm volume: $e");
     }
 
+    // Cấu hình TTS
     await _flutterTts.setLanguage("vi-VN");
-    await _flutterTts.setSpeechRate(0.73);
+    await _flutterTts.setSpeechRate(0.5);
     await _flutterTts.setVolume(1.0);
     await _flutterTts.setPitch(1.0);
-    await _flutterTts.awaitSpeakCompletion(true);
-  }
 
-  void _startSpeaking() {
-    _speak();
-
-    _speechTimer = Timer.periodic(const Duration(milliseconds: 2500), (_) {
-      if (mounted && _isSpeaking) {
-        _speak();
+    // Quan trọng: lắng nghe khi đọc xong 1 lần
+    _flutterTts.setCompletionHandler(() {
+      if (mounted && _shouldContinueSpeaking && _isSpeaking) {
+        _speak(); // Đọc lại ngay khi hoàn thành lần trước
       }
+    });
+
+    // Optional: lắng nghe lỗi hoặc cancel để debug
+    _flutterTts.setErrorHandler((msg) {
+      print("TTS error: $msg");
     });
   }
 
+  void _startSpeakingLoop() {
+    _speak(); // Bắt đầu lần đầu tiên
+  }
+
   Future<void> _speak() async {
-    if (!_isSpeaking) return;
-    await _flutterTts.speak(_fullText);
+    if (!_isSpeaking || !_shouldContinueSpeaking) return;
+
+    try {
+      await _flutterTts.speak(_fullText);
+      // Không cần await awaitSpeakCompletion nữa vì ta dùng completion handler
+    } catch (e) {
+      print("Lỗi khi speak: $e");
+    }
   }
 
   void _startVibration() async {
     if (await Vibration.hasVibrator() ?? false) {
       Vibration.vibrate(duration: 1300);
       _vibrationTimer = Timer.periodic(const Duration(seconds: 2), (_) {
-        Vibration.vibrate(duration: 800);
+        if (_isSpeaking) {
+          Vibration.vibrate(duration: 800);
+        }
       });
     }
   }
 
   void _stopAlarm() async {
     _isSpeaking = false;
+    _shouldContinueSpeaking = false;
+
     _vibrationTimer?.cancel();
-    _speechTimer?.cancel();
     await _flutterTts.stop();
     await Vibration.cancel();
     await WakelockPlus.disable();
 
     SystemChrome.setEnabledSystemUIMode(SystemUiMode.edgeToEdge);
+
     if (mounted) {
       Navigator.pushReplacement(
         context,
@@ -111,10 +126,10 @@ class _FullScreenMessageState extends State<FullScreenMessage> {
   @override
   void dispose() {
     _vibrationTimer?.cancel();
-    _speechTimer?.cancel();
     _flutterTts.stop();
     Vibration.cancel();
     WakelockPlus.disable();
+    _shouldContinueSpeaking = false;
     super.dispose();
   }
 
@@ -124,6 +139,32 @@ class _FullScreenMessageState extends State<FullScreenMessage> {
       onWillPop: () async => false,
       child: Scaffold(
         backgroundColor: const Color(0xFF1a0033),
+        floatingActionButtonLocation: FloatingActionButtonLocation.centerFloat,
+        floatingActionButton: Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 16),
+          child: ElevatedButton(
+            onPressed: _stopAlarm,
+            style: ElevatedButton.styleFrom(
+              backgroundColor: Colors.red.shade700,
+              foregroundColor: Colors.white,
+              padding: const EdgeInsets.symmetric(),
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(28),
+              ),
+              elevation: 8,
+              minimumSize:
+                  const Size(double.infinity, 70), // rộng full nếu muốn
+            ),
+            child: const Text(
+              'DỪNG BÁO THỨC',
+              style: TextStyle(
+                fontSize: 24,
+                fontWeight: FontWeight.bold,
+                letterSpacing: 1.2,
+              ),
+            ),
+          ),
+        ),
         body: SafeArea(
           child: Stack(
             children: [
@@ -136,48 +177,37 @@ class _FullScreenMessageState extends State<FullScreenMessage> {
                   ),
                 ),
               ),
-              Center(
-                child: Padding(
-                  padding: const EdgeInsets.symmetric(horizontal: 40),
-                  child: Column(
-                    mainAxisAlignment: MainAxisAlignment.center,
-                    children: [
-                      const Icon(Icons.alarm, size: 90, color: Colors.white70),
-                      const SizedBox(height: 30),
-                      Text(
-                        widget.message,
-                        textAlign: TextAlign.center,
-                        style: const TextStyle(
-                          fontSize: 44,
-                          fontWeight: FontWeight.bold,
-                          color: Colors.white,
-                          height: 1.35,
+              Container(
+                  width: double.infinity,
+                  height: 570,
+                  child: SingleChildScrollView(
+                    child: Center(
+                      child: Padding(
+                        padding: const EdgeInsets.symmetric(horizontal: 40),
+                        child: Column(
+                          mainAxisAlignment: MainAxisAlignment.center,
+                          children: [
+                            const Icon(
+                              Icons.alarm,
+                              size: 90,
+                              color: Colors.white70,
+                            ),
+                            const SizedBox(height: 30),
+                            Text(
+                              widget.message,
+                              textAlign: TextAlign.center,
+                              style: const TextStyle(
+                                fontSize: 35,
+                                fontWeight: FontWeight.bold,
+                                color: Colors.white,
+                                height: 1.35,
+                              ),
+                            ),
+                          ],
                         ),
                       ),
-                    ],
-                  ),
-                ),
-              ),
-              Positioned(
-                bottom: 70,
-                left: 40,
-                right: 40,
-                child: ElevatedButton(
-                  onPressed: _stopAlarm,
-                  style: ElevatedButton.styleFrom(
-                    backgroundColor: Colors.red.shade700,
-                    foregroundColor: Colors.white,
-                    padding: const EdgeInsets.symmetric(vertical: 22),
-                    shape: RoundedRectangleBorder(
-                      borderRadius: BorderRadius.circular(20),
                     ),
-                  ),
-                  child: const Text(
-                    'DỪNG BÁO THỨC',
-                    style: TextStyle(fontSize: 24, fontWeight: FontWeight.bold),
-                  ),
-                ),
-              ),
+                  )),
             ],
           ),
         ),

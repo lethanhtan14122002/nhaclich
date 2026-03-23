@@ -363,6 +363,38 @@ class _TextAlarmAppState extends State<TextAlarmApp>
   Widget build(BuildContext context) {
     final activeAlarms = alarms.where((a) => a.enabled).toList();
 
+    // Nhóm báo thức theo ngày trong tuần (1: Thứ 2, ..., 7: Chủ Nhật)
+    final Map<int, List<AlarmModel>> alarmsByDay = {};
+
+    for (var alarm in activeAlarms) {
+      if (alarm.isRepeating && alarm.repeatDays.any((e) => e)) {
+        for (int i = 0; i < 7; i++) {
+          if (alarm.repeatDays[i]) {
+            final dayIndex = (i + 1) % 7;
+            final adjustedIndex = dayIndex == 0 ? 7 : dayIndex;
+            alarmsByDay.putIfAbsent(adjustedIndex, () => []).add(alarm);
+          }
+        }
+      } else {
+        final weekday = alarm.scheduledTime.weekday;
+        alarmsByDay.putIfAbsent(weekday, () => []).add(alarm);
+      }
+    }
+
+    alarmsByDay.forEach((key, value) {
+      value.sort((a, b) => a.scheduledTime.compareTo(b.scheduledTime));
+    });
+
+    final daysOfWeek = [
+      'Thứ 2',
+      'Thứ 3',
+      'Thứ 4',
+      'Thứ 5',
+      'Thứ 6',
+      'Thứ 7',
+      'Chủ Nhật'
+    ];
+
     return Scaffold(
       appBar: AppBar(title: const Text('NHẮC LỊCH')),
       body: activeAlarms.isEmpty
@@ -381,45 +413,92 @@ class _TextAlarmAppState extends State<TextAlarmApp>
               ),
             )
           : ListView.builder(
-              padding: const EdgeInsets.all(16),
-              itemCount: activeAlarms.length,
+              padding: const EdgeInsets.all(12),
+              itemCount: 7,
               itemBuilder: (context, index) {
-                final alarm = activeAlarms[index];
+                final dayIndex = index + 1; // 1 → Thứ 2, 7 → CN
+                final dayName = daysOfWeek[index];
+                final dayAlarms = alarmsByDay[dayIndex] ?? [];
 
-                return Card(
-                  margin: const EdgeInsets.only(bottom: 16),
-                  child: ListTile(
-                    onTap: () => _editAlarm(alarms.indexOf(alarm)),
-                    title: Text(
-                      '${alarm.scheduledTime.hour.toString().padLeft(2, '0')}:${alarm.scheduledTime.minute.toString().padLeft(2, '0')}',
-                      style: const TextStyle(
-                          fontSize: 36, fontWeight: FontWeight.bold),
-                    ),
-                    subtitle: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Text(alarm.message,
-                            maxLines: 2, overflow: TextOverflow.ellipsis),
-                        const SizedBox(height: 8),
-                        Text(
-                          alarm.getRepeatDaysText(),
-                          style: const TextStyle(color: Colors.blue),
+                if (dayAlarms.isEmpty) {
+                  return const SizedBox.shrink();
+                }
+
+                return Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    // Tiêu đề ngày
+                    Padding(
+                      padding: const EdgeInsets.fromLTRB(8, 20, 8, 12),
+                      child: Text(
+                        dayName,
+                        style: const TextStyle(
+                          fontSize: 22,
+                          fontWeight: FontWeight.bold,
+                          color: Colors.blueAccent,
                         ),
-                      ],
+                      ),
                     ),
-                    trailing: Row(
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        IconButton(
-                            icon: const Icon(Icons.edit),
-                            onPressed: () => _editAlarm(alarms.indexOf(alarm))),
-                        IconButton(
-                          icon: const Icon(Icons.delete, color: Colors.red),
-                          onPressed: () => _deleteAlarm(alarms.indexOf(alarm)),
+                    // Danh sách báo thức trong ngày
+                    ...dayAlarms.map((alarm) {
+                      final alarmIndex = alarms.indexOf(alarm);
+                      return Card(
+                        margin: const EdgeInsets.symmetric(
+                            vertical: 6, horizontal: 4),
+                        elevation: 3,
+                        shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(16),
                         ),
-                      ],
-                    ),
-                  ),
+                        child: ListTile(
+                          contentPadding: const EdgeInsets.symmetric(
+                            horizontal: 16,
+                            vertical: 12,
+                          ),
+                          onTap: () => _editAlarm(alarmIndex),
+                          leading: CircleAvatar(
+                            radius:
+                                36, // ← tăng kích thước vòng tròn (từ mặc định ~20 → 36)
+                            backgroundColor: Colors.blue.shade50,
+                            child: Text(
+                              '${alarm.scheduledTime.hour.toString().padLeft(2, '0')}:${alarm.scheduledTime.minute.toString().padLeft(2, '0')}',
+                              style: const TextStyle(
+                                fontSize: 20, // ← font lớn hơn
+                                fontWeight: FontWeight.bold,
+                                color: Colors.blue,
+                              ),
+                            ),
+                          ),
+                          title: Text(
+                            alarm.message,
+                            maxLines: 2,
+                            overflow: TextOverflow.ellipsis,
+                            style: const TextStyle(
+                              fontSize: 17,
+                              fontWeight: FontWeight.w600,
+                            ),
+                          ),
+                          subtitle: alarm.isRepeating
+                              ? Padding(
+                                  padding: const EdgeInsets.only(top: 4),
+                                  child: Text(
+                                    alarm.getRepeatDaysText(),
+                                    style: TextStyle(
+                                      color: Colors.blueGrey[700],
+                                      fontSize: 14,
+                                    ),
+                                  ),
+                                )
+                              : null,
+                          trailing: IconButton(
+                            icon: const Icon(Icons.delete_outline,
+                                color: Colors.redAccent),
+                            onPressed: () => _deleteAlarm(alarmIndex),
+                          ),
+                        ),
+                      );
+                    }).toList(),
+                    const Divider(height: 32, thickness: 1.2),
+                  ],
                 );
               },
             ),
