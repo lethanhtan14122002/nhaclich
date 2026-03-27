@@ -14,6 +14,7 @@ import 'package:uuid/uuid.dart';
 import 'models/alarm_model.dart';
 import 'screens/create_alarm_screen.dart';
 import 'screens/fullscreen_message_screen.dart';
+import 'package:google_mobile_ads/google_mobile_ads.dart';
 
 final GlobalKey<NavigatorState> navigatorKey = GlobalKey<NavigatorState>();
 
@@ -28,6 +29,8 @@ const MethodChannel _messageChannel =
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
   tzdata.initializeTimeZones();
+  WidgetsFlutterBinding.ensureInitialized();
+  await MobileAds.instance.initialize();
 
   await _initializeNotifications();
   await requestPermissions();

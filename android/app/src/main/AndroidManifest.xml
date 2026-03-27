@@ -52,6 +52,9 @@
             </intent-filter>
         </activity>
 
+        <!--  AdMob App ID  -->
+        <meta-data android:name="com.google.android.gms.ads.APPLICATION_ID" android:value="ca-app-pub-9845708085342386~7059723559"/>
+
         <!-- ==================== BROADCAST RECEIVER ==================== -->
         <receiver
             android:name=".AlarmReceiver"
